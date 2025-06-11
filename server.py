@@ -30,7 +30,7 @@ with RequestBlocker():
     import gradio as gr
 
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use('Agg')  # This fixes LaTeX rendering on some systems
 
 import json
 import signal
@@ -67,16 +67,21 @@ from modules.models_settings import (
 from modules.shared import do_cmd_flags_warnings
 from modules.utils import gradio
 
+
 def signal_handler(sig, frame):
     logger.info("Received Ctrl+C. Shutting down Text generation web UI gracefully.")
+
     if shared.model and shared.model.__class__.__name__ == 'LlamaServer':
         try:
             shared.model.stop()
         except:
             pass
+
     sys.exit(0)
 
+
 signal.signal(signal.SIGINT, signal_handler)
+
 
 def create_interface():
     title = 'Text generation web UI'
@@ -89,7 +94,7 @@ def create_interface():
             auth.extend(x.strip() for line in file for x in line.split(',') if x.strip())
     auth = [tuple(cred.split(':')) for cred in auth]
 
-    if shared.args.extensions is not None and len(shared.args.extensions) > 0:
+    if shared.args.extensions:
         extensions_module.load_extensions()
 
     shared.persistent_interface_state.update({
@@ -115,10 +120,14 @@ def create_interface():
         shared.gradio['interface_state'] = gr.State({k: None for k in shared.input_elements})
 
         if Path("user_data/notification.mp3").exists():
-            shared.gradio['audio_notification'] = gr.Audio(interactive=False, value="user_data/notification.mp3", elem_id="audio_notification", visible=False)
+            shared.gradio['audio_notification'] = gr.Audio(
+                interactive=False, value="user_data/notification.mp3",
+                elem_id="audio_notification", visible=False
+            )
 
         ui_file_saving.create_ui()
         shared.gradio['temporary_text'] = gr.Textbox(visible=False)
+
         ui_chat.create_ui()
         ui_default.create_ui()
         ui_notebook.create_ui()
@@ -144,7 +153,6 @@ def create_interface():
             js=f"""(x) => {{
                 const savedTheme = localStorage.getItem('theme');
                 const serverTheme = {str(shared.settings['dark_theme']).lower()} ? 'dark' : 'light';
-
                 if (!savedTheme || !sessionStorage.getItem('theme_synced')) {{
                     localStorage.setItem('theme', serverTheme);
                     sessionStorage.setItem('theme_synced', 'true');
@@ -166,7 +174,12 @@ def create_interface():
             }}"""
         )
 
-        shared.gradio['interface'].load(partial(ui.apply_interface_values, {}, use_persistent=True), None, gradio(ui.list_interface_input_elements()), show_progress=False)
+        shared.gradio['interface'].load(
+            partial(ui.apply_interface_values, {}, use_persistent=True),
+            None,
+            gradio(ui.list_interface_input_elements()),
+            show_progress=False
+        )
 
         extensions_module.create_extensions_tabs()
         extensions_module.create_extensions_block()
@@ -187,24 +200,25 @@ def create_interface():
             root_path=shared.args.subpath,
             allowed_paths=["css", "js", "extensions", "user_data/cache"]
         )
-
 if __name__ == "__main__":
+
     logger.info("Starting Text generation web UI")
     do_cmd_flags_warnings()
 
     settings_file = None
-    if shared.args.settings is not None and Path(shared.args.settings).exists():
+    if shared.args.settings and Path(shared.args.settings).exists():
         settings_file = Path(shared.args.settings)
     elif Path('user_data/settings.yaml').exists():
         settings_file = Path('user_data/settings.yaml')
     elif Path('user_data/settings.json').exists():
         settings_file = Path('user_data/settings.json')
 
-    if settings_file is not None:
+    if settings_file:
         logger.info(f"Loading settings from \"{settings_file}\"")
-        file_contents = open(settings_file, 'r', encoding='utf-8').read()
-        new_settings = json.loads(file_contents) if settings_file.suffix == "json" else yaml.safe_load(file_contents)
-        shared.settings.update(new_settings)
+        with open(settings_file, 'r', encoding='utf-8') as f:
+            contents = f.read()
+            new_settings = json.loads(contents) if settings_file.suffix == ".json" else yaml.safe_load(contents)
+            shared.settings.update(new_settings)
 
     shared.model_config['.*'] = get_fallback_settings()
     shared.model_config.move_to_end('.*', last=False)
@@ -212,10 +226,10 @@ if __name__ == "__main__":
     extensions_module.available_extensions = utils.get_available_extensions()
     available_models = utils.get_available_models()
 
-    if shared.args.model is not None:
+    if shared.args.model:
         shared.model_name = shared.args.model
     elif shared.args.model_menu:
-        if len(available_models) == 0:
+        if not available_models:
             logger.error('No models are available! Please download at least one.')
             sys.exit(0)
         else:
@@ -239,7 +253,7 @@ if __name__ == "__main__":
         update_model_parameters(model_settings, initial=True)
 
         if 'gpu_layers' not in shared.provided_arguments and shared.args.loader == 'llama.cpp' and 'gpu_layers' in model_settings:
-            vram_usage, adjusted_layers = update_gpu_layers_and_vram(
+            _, adjusted_layers = update_gpu_layers_and_vram(
                 shared.args.loader,
                 model_name,
                 model_settings['gpu_layers'],
