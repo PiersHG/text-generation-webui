@@ -30,7 +30,7 @@ with RequestBlocker():
     import gradio as gr
 
 import matplotlib
-matplotlib.use('Agg')  # This fixes LaTeX rendering on some systems
+matplotlib.use('Agg')
 
 import json
 import signal
@@ -80,6 +80,7 @@ signal.signal(signal.SIGINT, signal_handler)
 
 def create_interface():
     title = 'Text generation web UI'
+
     auth = []
     if shared.args.gradio_auth:
         auth.extend(x.strip() for x in shared.args.gradio_auth.strip('"').replace('\n', '').split(',') if x.strip())
@@ -88,7 +89,7 @@ def create_interface():
             auth.extend(x.strip() for line in file for x in line.split(',') if x.strip())
     auth = [tuple(cred.split(':')) for cred in auth]
 
-    if shared.args.extensions:
+    if shared.args.extensions is not None and len(shared.args.extensions) > 0:
         extensions_module.load_extensions()
 
     shared.persistent_interface_state.update({
@@ -118,7 +119,6 @@ def create_interface():
 
         ui_file_saving.create_ui()
         shared.gradio['temporary_text'] = gr.Textbox(visible=False)
-
         ui_chat.create_ui()
         ui_default.create_ui()
         ui_notebook.create_ui()
@@ -134,6 +134,7 @@ def create_interface():
         ui_file_saving.create_event_handlers()
         ui_parameters.create_event_handlers()
         ui_model_menu.create_event_handlers()
+
         ui.setup_auto_save()
 
         shared.gradio['interface'].load(
@@ -143,20 +144,30 @@ def create_interface():
             js=f"""(x) => {{
                 const savedTheme = localStorage.getItem('theme');
                 const serverTheme = {str(shared.settings['dark_theme']).lower()} ? 'dark' : 'light';
+
                 if (!savedTheme || !sessionStorage.getItem('theme_synced')) {{
                     localStorage.setItem('theme', serverTheme);
                     sessionStorage.setItem('theme_synced', 'true');
-                    document.body.classList.toggle('dark', serverTheme === 'dark');
+                    if (serverTheme === 'dark') {{
+                        document.getElementsByTagName('body')[0].classList.add('dark');
+                    }} else {{
+                        document.getElementsByTagName('body')[0].classList.remove('dark');
+                    }}
                 }} else {{
-                    document.body.classList.toggle('dark', savedTheme === 'dark');
+                    if (savedTheme === 'dark') {{
+                        document.getElementsByTagName('body')[0].classList.add('dark');
+                    }} else {{
+                        document.getElementsByTagName('body')[0].classList.remove('dark');
+                    }}
                 }}
                 {js}
                 {ui.show_controls_js}
                 toggle_controls(x);
-            }}"
+            }}"""
         )
 
         shared.gradio['interface'].load(partial(ui.apply_interface_values, {}, use_persistent=True), None, gradio(ui.list_interface_input_elements()), show_progress=False)
+
         extensions_module.create_extensions_tabs()
         extensions_module.create_extensions_block()
 
@@ -165,9 +176,9 @@ def create_interface():
         shared.gradio['interface'].launch(
             max_threads=64,
             prevent_thread_lock=True,
-            share=False,
-            server_name='0.0.0.0',
-            server_port=7860,
+            share=shared.args.share,
+            server_name=None if not shared.args.listen else (shared.args.listen_host or '0.0.0.0'),
+            server_port=shared.args.listen_port,
             inbrowser=shared.args.auto_launch,
             auth=auth or None,
             ssl_verify=False if (shared.args.ssl_keyfile or shared.args.ssl_certfile) else True,
@@ -182,44 +193,53 @@ if __name__ == "__main__":
     do_cmd_flags_warnings()
 
     settings_file = None
-    if shared.args.settings and Path(shared.args.settings).exists():
+    if shared.args.settings is not None and Path(shared.args.settings).exists():
         settings_file = Path(shared.args.settings)
     elif Path('user_data/settings.yaml').exists():
         settings_file = Path('user_data/settings.yaml')
     elif Path('user_data/settings.json').exists():
         settings_file = Path('user_data/settings.json')
 
-    if settings_file:
+    if settings_file is not None:
         logger.info(f"Loading settings from \"{settings_file}\"")
-        with open(settings_file, 'r', encoding='utf-8') as f:
-            new_settings = json.loads(f.read()) if settings_file.suffix == ".json" else yaml.safe_load(f)
+        file_contents = open(settings_file, 'r', encoding='utf-8').read()
+        new_settings = json.loads(file_contents) if settings_file.suffix == "json" else yaml.safe_load(file_contents)
         shared.settings.update(new_settings)
 
     shared.model_config['.*'] = get_fallback_settings()
     shared.model_config.move_to_end('.*', last=False)
+
     extensions_module.available_extensions = utils.get_available_extensions()
     available_models = utils.get_available_models()
 
-    if shared.args.model:
+    if shared.args.model is not None:
         shared.model_name = shared.args.model
     elif shared.args.model_menu:
-        if not available_models:
+        if len(available_models) == 0:
             logger.error('No models are available! Please download at least one.')
             sys.exit(0)
-        print('\n'.join(f'{i+1}. {model}' for i, model in enumerate(available_models)))
-        i = int(input(f'\nWhich one do you want to load? 1-{len(available_models)}\n')) - 1
+        else:
+            print('The following models are available:\n')
+            for i, model in enumerate(available_models):
+                print(f'{i+1}. {model}')
+            print(f'\nWhich one do you want to load? 1-{len(available_models)}\n')
+            i = int(input()) - 1
+            print()
         shared.model_name = available_models[i]
 
     if shared.model_name != 'None':
         p = Path(shared.model_name)
-        model_name = p.parts[-1] if p.exists() else shared.model_name
-        shared.model_name = model_name
+        if p.exists():
+            model_name = p.parts[-1]
+            shared.model_name = model_name
+        else:
+            model_name = shared.model_name
 
         model_settings = get_model_metadata(model_name)
         update_model_parameters(model_settings, initial=True)
 
         if 'gpu_layers' not in shared.provided_arguments and shared.args.loader == 'llama.cpp' and 'gpu_layers' in model_settings:
-            _, adjusted_layers = update_gpu_layers_and_vram(
+            vram_usage, adjusted_layers = update_gpu_layers_and_vram(
                 shared.args.loader,
                 model_name,
                 model_settings['gpu_layers'],
