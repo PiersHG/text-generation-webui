@@ -184,22 +184,20 @@ def create_interface():
         extensions_module.create_extensions_tabs()
         extensions_module.create_extensions_block()
 
-    shared.gradio['interface'].queue()
-    with OpenMonkeyPatch():
-        shared.gradio['interface'].launch(
-            max_threads=64,
-            prevent_thread_lock=True,
-            share=shared.args.share,
-            server_name=None if not shared.args.listen else (shared.args.listen_host or '0.0.0.0'),
-            server_port=shared.args.listen_port,
-            inbrowser=shared.args.auto_launch,
-            auth=auth or None,
-            ssl_verify=False if (shared.args.ssl_keyfile or shared.args.ssl_certfile) else True,
-            ssl_keyfile=shared.args.ssl_keyfile,
-            ssl_certfile=shared.args.ssl_certfile,
-            root_path=shared.args.subpath,
-            allowed_paths=["css", "js", "extensions", "user_data/cache"]
-        )
+   shared.gradio['interface'].launch(
+    max_threads=64,
+    prevent_thread_lock=True,
+    share=shared.args.share,
+    server_name='0.0.0.0',
+    server_port=shared.args.listen_port,
+    inbrowser=shared.args.auto_launch,
+    auth=auth or None,
+    ssl_verify=False if (shared.args.ssl_keyfile or shared.args.ssl_certfile) else True,
+    ssl_keyfile=shared.args.ssl_keyfile,
+    ssl_certfile=shared.args.ssl_certfile,
+    root_path=shared.args.subpath,
+    allowed_paths=["css", "js", "extensions", "user_data/cache"]
+)
 if __name__ == "__main__":
 
     logger.info("Starting Text generation web UI")
