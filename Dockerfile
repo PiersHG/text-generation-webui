@@ -1,21 +1,21 @@
-FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
+# Use an official Python image as the base
+FROM python:3.10-slim
 
-# Set environment
-ENV DEBIAN_FRONTEND=noninteractive
+# Set the working directory
 WORKDIR /app
 
-# System dependencies
-RUN apt-get update && apt-get install -y \
-    git python3 python3-pip python-is-python3 curl && \
-    apt-get clean
-
-# Clone web UI
-RUN git clone https://github.com/oobabooga/text-generation-webui .
+# Copy the requirements.txt into the container
+COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
-# Expose port and set entrypoint
+# Copy the rest of the application code
+COPY . .
+
+# Expose the port the app runs on (optional, based on web UI)
 EXPOSE 7860
-CMD ["python3", "server.py", "--model", "models/Nous-Hermes-2-Mistral"]
+
+# Command to run the app — adjust if different
+CMD ["python3", "server.py"]
