@@ -3,3 +3,4 @@ rich
 gradio
 transformers
 fastapi
+markdown
