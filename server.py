@@ -30,11 +30,9 @@ with RequestBlocker():
     import gradio as gr
 
 import matplotlib
-
 matplotlib.use('Agg')  # This fixes LaTeX rendering on some systems
 
 import json
-import os
 import signal
 import sys
 import time
@@ -69,28 +67,19 @@ from modules.models_settings import (
 from modules.shared import do_cmd_flags_warnings
 from modules.utils import gradio
 
-
 def signal_handler(sig, frame):
     logger.info("Received Ctrl+C. Shutting down Text generation web UI gracefully.")
-
-    # Explicitly stop LlamaServer to avoid __del__ cleanup issues during shutdown
     if shared.model and shared.model.__class__.__name__ == 'LlamaServer':
         try:
             shared.model.stop()
         except:
             pass
-
     sys.exit(0)
-
 
 signal.signal(signal.SIGINT, signal_handler)
 
-
 def create_interface():
-
     title = 'Text generation web UI'
-
-    # Password authentication
     auth = []
     if shared.args.gradio_auth:
         auth.extend(x.strip() for x in shared.args.gradio_auth.strip('"').replace('\n', '').split(',') if x.strip())
@@ -99,122 +88,86 @@ def create_interface():
             auth.extend(x.strip() for line in file for x in line.split(',') if x.strip())
     auth = [tuple(cred.split(':')) for cred in auth]
 
-    # Import the extensions and execute their setup() functions
-    if shared.args.extensions is not None and len(shared.args.extensions) > 0:
+    if shared.args.extensions:
         extensions_module.load_extensions()
 
-    # Force some events to be triggered on page load
     shared.persistent_interface_state.update({
         'mode': shared.settings['mode'],
         'loader': shared.args.loader or 'llama.cpp',
         'filter_by_loader': (shared.args.loader or 'All') if not shared.args.portable else 'llama.cpp'
     })
 
-    # Clear existing cache files
     for cache_file in ['pfp_character.png', 'pfp_character_thumb.png']:
         cache_path = Path(f"user_data/cache/{cache_file}")
         if cache_path.exists():
             cache_path.unlink()
 
-    # Regenerate for default character
     if shared.settings['mode'] != 'instruct':
         generate_pfp_cache(shared.settings['character'])
 
-    # css/js strings
-    css = ui.css
-    js = ui.js
-    css += apply_extensions('css')
-    js += apply_extensions('js')
+    css = ui.css + apply_extensions('css')
+    js = ui.js + apply_extensions('js')
 
-    # Interface state elements
     shared.input_elements = ui.list_interface_input_elements()
 
     with gr.Blocks(css=css, analytics_enabled=False, title=title, theme=ui.theme) as shared.gradio['interface']:
-
-        # Interface state
         shared.gradio['interface_state'] = gr.State({k: None for k in shared.input_elements})
 
-        # Audio notification
         if Path("user_data/notification.mp3").exists():
             shared.gradio['audio_notification'] = gr.Audio(interactive=False, value="user_data/notification.mp3", elem_id="audio_notification", visible=False)
 
-        # Floating menus for saving/deleting files
         ui_file_saving.create_ui()
-
-        # Temporary clipboard for saving files
         shared.gradio['temporary_text'] = gr.Textbox(visible=False)
 
-        # Text Generation tab
         ui_chat.create_ui()
         ui_default.create_ui()
         ui_notebook.create_ui()
-
-        ui_parameters.create_ui()  # Parameters tab
-        ui_model_menu.create_ui()  # Model tab
+        ui_parameters.create_ui()
+        ui_model_menu.create_ui()
         if not shared.args.portable:
-            training.create_ui()  # Training tab
-        ui_session.create_ui()  # Session tab
+            training.create_ui()
+        ui_session.create_ui()
 
-        # Generation events
         ui_chat.create_event_handlers()
         ui_default.create_event_handlers()
         ui_notebook.create_event_handlers()
-
-        # Other events
         ui_file_saving.create_event_handlers()
         ui_parameters.create_event_handlers()
         ui_model_menu.create_event_handlers()
-
-        # UI persistence events
         ui.setup_auto_save()
 
-        # Interface launch events
         shared.gradio['interface'].load(
             None,
             gradio('show_controls'),
             None,
             js=f"""(x) => {{
-                // Check if this is first visit or if localStorage is out of sync
                 const savedTheme = localStorage.getItem('theme');
                 const serverTheme = {str(shared.settings['dark_theme']).lower()} ? 'dark' : 'light';
-
-                // If no saved theme or mismatch with server on first load, use server setting
                 if (!savedTheme || !sessionStorage.getItem('theme_synced')) {{
                     localStorage.setItem('theme', serverTheme);
                     sessionStorage.setItem('theme_synced', 'true');
-                    if (serverTheme === 'dark') {{
-                        document.getElementsByTagName('body')[0].classList.add('dark');
-                    }} else {{
-                        document.getElementsByTagName('body')[0].classList.remove('dark');
-                    }}
+                    document.body.classList.toggle('dark', serverTheme === 'dark');
                 }} else {{
-                    // Use localStorage for subsequent reloads
-                    if (savedTheme === 'dark') {{
-                        document.getElementsByTagName('body')[0].classList.add('dark');
-                    }} else {{
-                        document.getElementsByTagName('body')[0].classList.remove('dark');
-                    }}
+                    document.body.classList.toggle('dark', savedTheme === 'dark');
                 }}
                 {js}
                 {ui.show_controls_js}
                 toggle_controls(x);
-            }}"""
+            }}"
         )
 
         shared.gradio['interface'].load(partial(ui.apply_interface_values, {}, use_persistent=True), None, gradio(ui.list_interface_input_elements()), show_progress=False)
+        extensions_module.create_extensions_tabs()
+        extensions_module.create_extensions_block()
 
-        extensions_module.create_extensions_tabs()  # Extensions tabs
-        extensions_module.create_extensions_block()  # Extensions block
-
-    # Launch the interface
     shared.gradio['interface'].queue()
     with OpenMonkeyPatch():
         shared.gradio['interface'].launch(
             max_threads=64,
             prevent_thread_lock=True,
-            share=shared.args.share,
-            server_name=None if not shared.args.listen else (shared.args.listen_host or '0.0.0.0'),
-            server_port=shared.args.listen_port,
+            share=False,
+            server_name='0.0.0.0',
+            server_port=7860,
             inbrowser=shared.args.auto_launch,
             auth=auth or None,
             ssl_verify=False if (shared.args.ssl_keyfile or shared.args.ssl_certfile) else True,
@@ -224,69 +177,49 @@ def create_interface():
             allowed_paths=["css", "js", "extensions", "user_data/cache"]
         )
 
-
 if __name__ == "__main__":
-
     logger.info("Starting Text generation web UI")
     do_cmd_flags_warnings()
 
-    # Load custom settings
     settings_file = None
-    if shared.args.settings is not None and Path(shared.args.settings).exists():
+    if shared.args.settings and Path(shared.args.settings).exists():
         settings_file = Path(shared.args.settings)
     elif Path('user_data/settings.yaml').exists():
         settings_file = Path('user_data/settings.yaml')
     elif Path('user_data/settings.json').exists():
         settings_file = Path('user_data/settings.json')
 
-    if settings_file is not None:
+    if settings_file:
         logger.info(f"Loading settings from \"{settings_file}\"")
-        file_contents = open(settings_file, 'r', encoding='utf-8').read()
-        new_settings = json.loads(file_contents) if settings_file.suffix == "json" else yaml.safe_load(file_contents)
+        with open(settings_file, 'r', encoding='utf-8') as f:
+            new_settings = json.loads(f.read()) if settings_file.suffix == ".json" else yaml.safe_load(f)
         shared.settings.update(new_settings)
 
-    # Fallback settings for models
     shared.model_config['.*'] = get_fallback_settings()
-    shared.model_config.move_to_end('.*', last=False)  # Move to the beginning
-
+    shared.model_config.move_to_end('.*', last=False)
     extensions_module.available_extensions = utils.get_available_extensions()
     available_models = utils.get_available_models()
 
-    # Model defined through --model
-    if shared.args.model is not None:
+    if shared.args.model:
         shared.model_name = shared.args.model
-
-    # Select the model from a command-line menu
     elif shared.args.model_menu:
-        if len(available_models) == 0:
+        if not available_models:
             logger.error('No models are available! Please download at least one.')
             sys.exit(0)
-        else:
-            print('The following models are available:\n')
-            for i, model in enumerate(available_models):
-                print(f'{i+1}. {model}')
-
-            print(f'\nWhich one do you want to load? 1-{len(available_models)}\n')
-            i = int(input()) - 1
-            print()
-
+        print('\n'.join(f'{i+1}. {model}' for i, model in enumerate(available_models)))
+        i = int(input(f'\nWhich one do you want to load? 1-{len(available_models)}\n')) - 1
         shared.model_name = available_models[i]
 
-    # If any model has been selected, load it
     if shared.model_name != 'None':
         p = Path(shared.model_name)
-        if p.exists():
-            model_name = p.parts[-1]
-            shared.model_name = model_name
-        else:
-            model_name = shared.model_name
+        model_name = p.parts[-1] if p.exists() else shared.model_name
+        shared.model_name = model_name
 
         model_settings = get_model_metadata(model_name)
-        update_model_parameters(model_settings, initial=True)  # hijack the command-line arguments
+        update_model_parameters(model_settings, initial=True)
 
-        # Auto-adjust GPU layers if not provided by user and it's a llama.cpp model
         if 'gpu_layers' not in shared.provided_arguments and shared.args.loader == 'llama.cpp' and 'gpu_layers' in model_settings:
-            vram_usage, adjusted_layers = update_gpu_layers_and_vram(
+            _, adjusted_layers = update_gpu_layers_and_vram(
                 shared.args.loader,
                 model_name,
                 model_settings['gpu_layers'],
@@ -295,10 +228,8 @@ if __name__ == "__main__":
                 auto_adjust=True,
                 for_ui=False
             )
-
             shared.args.gpu_layers = adjusted_layers
 
-        # Load the model
         shared.model, shared.tokenizer = load_model(model_name)
         if shared.args.lora:
             add_lora_to_model(shared.args.lora)
@@ -311,12 +242,10 @@ if __name__ == "__main__":
         timer_thread.start()
 
     if shared.args.nowebui:
-        # Start the API in standalone mode
         shared.args.extensions = [x for x in (shared.args.extensions or []) if x != 'gallery']
         if shared.args.extensions:
             extensions_module.load_extensions()
     else:
-        # Launch the web UI
         create_interface()
         while True:
             time.sleep(0.5)
