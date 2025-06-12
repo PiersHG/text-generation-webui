@@ -7,6 +7,16 @@ from modules import shared
 from modules.block_requests import OpenMonkeyPatch, RequestBlocker
 from modules.logging_colors import logger
 
+# Load external config file from specific path
+import yaml
+CONFIG_PATH = Path("user_data/models/config.yaml")
+if CONFIG_PATH.exists():
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    print(f"[INFO] Loaded config from {CONFIG_PATH}")
+else:
+    print(f"[WARNING] Config file not found at {CONFIG_PATH}")
+
 # Set up Gradio temp directory path
 gradio_temp_path = Path('user_data') / 'cache' / 'gradio'
 shutil.rmtree(gradio_temp_path, ignore_errors=True)
@@ -30,7 +40,7 @@ with RequestBlocker():
     import gradio as gr
 
 import matplotlib
-matplotlib.use('Agg')  # This fixes LaTeX rendering on some systems
+matplotlib.use('Agg')
 
 import json
 import signal
@@ -38,8 +48,6 @@ import sys
 import time
 from functools import partial
 from threading import Lock, Thread
-
-import yaml
 
 import modules.extensions as extensions_module
 from modules import (
@@ -67,25 +75,19 @@ from modules.models_settings import (
 from modules.shared import do_cmd_flags_warnings
 from modules.utils import gradio
 
-
 def signal_handler(sig, frame):
     logger.info("Received Ctrl+C. Shutting down Text generation web UI gracefully.")
-
     if shared.model and shared.model.__class__.__name__ == 'LlamaServer':
         try:
             shared.model.stop()
         except:
             pass
-
     sys.exit(0)
-
 
 signal.signal(signal.SIGINT, signal_handler)
 
-
 def create_interface():
     title = 'Text generation web UI'
-
     auth = []
     if shared.args.gradio_auth:
         auth.extend(x.strip() for x in shared.args.gradio_auth.strip('"').replace('\n', '').split(',') if x.strip())
@@ -120,10 +122,7 @@ def create_interface():
         shared.gradio['interface_state'] = gr.State({k: None for k in shared.input_elements})
 
         if Path("user_data/notification.mp3").exists():
-            shared.gradio['audio_notification'] = gr.Audio(
-                interactive=False, value="user_data/notification.mp3",
-                elem_id="audio_notification", visible=False
-            )
+            shared.gradio['audio_notification'] = gr.Audio(interactive=False, value="user_data/notification.mp3", elem_id="audio_notification", visible=False)
 
         ui_file_saving.create_ui()
         shared.gradio['temporary_text'] = gr.Textbox(visible=False)
@@ -174,32 +173,27 @@ def create_interface():
             }}"""
         )
 
-        shared.gradio['interface'].load(
-            partial(ui.apply_interface_values, {}, use_persistent=True),
-            None,
-            gradio(ui.list_interface_input_elements()),
-            show_progress=False
-        )
+        shared.gradio['interface'].load(partial(ui.apply_interface_values, {}, use_persistent=True), None, gradio(ui.list_interface_input_elements()), show_progress=False)
 
         extensions_module.create_extensions_tabs()
         extensions_module.create_extensions_block()
 
-   shared.gradio['interface'].launch(
-    max_threads=64,
-    prevent_thread_lock=True,
-    share=shared.args.share,
-    server_name='0.0.0.0',
-    server_port=shared.args.listen_port,
-    inbrowser=shared.args.auto_launch,
-    auth=auth or None,
-    ssl_verify=False if (shared.args.ssl_keyfile or shared.args.ssl_certfile) else True,
-    ssl_keyfile=shared.args.ssl_keyfile,
-    ssl_certfile=shared.args.ssl_certfile,
-    root_path=shared.args.subpath,
-    allowed_paths=["css", "js", "extensions", "user_data/cache"]
-)
-if __name__ == "__main__":
+    shared.gradio['interface'].launch(
+        max_threads=64,
+        prevent_thread_lock=True,
+        share=shared.args.share,
+        server_name='0.0.0.0',
+        server_port=shared.args.listen_port,
+        inbrowser=shared.args.auto_launch,
+        auth=auth or None,
+        ssl_verify=False if (shared.args.ssl_keyfile or shared.args.ssl_certfile) else True,
+        ssl_keyfile=shared.args.ssl_keyfile,
+        ssl_certfile=shared.args.ssl_certfile,
+        root_path=shared.args.subpath,
+        allowed_paths=["css", "js", "extensions", "user_data/cache"]
+    )
 
+if __name__ == "__main__":
     logger.info("Starting Text generation web UI")
     do_cmd_flags_warnings()
 
